@@ -80,7 +80,7 @@ end
 
   fvp(idof) = fvp(idof) + fvpe;
 %
-if any(isnan(fvpe))
+if any(isnan(fvpe) | isinf(fvpe))
     fprintf(1, ['\n  ielem = %9i  \n'], ielem)
     eval(['save ', 'fvpe.mat fvpe ;'])
     eval(['save ', 'histe.mat histe ;'])

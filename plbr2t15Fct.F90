@@ -190,6 +190,7 @@ implicit none
     real*8                                                      :: tau_prv(2,1)
     real*8                                                      :: gEp_prv, rho_prv(2,1), veps_pl(4,1)
     real*8                                                      :: ad1, delta_depsipl_ad(1,1), xy(1,1)
+    real*8                                                      :: tmp_sigmae, tmp_dEp_log
     
     real*8                                                      :: fvpu(12,1), fvpe(3,1), fvp(15,1), qs(1,1)
     
@@ -302,10 +303,11 @@ I3(4,:) = [0.d0,0.d0,0.d0]
 !
     elseif (key .eq. 'histe') then
             ! number of integration points
-        
+
             nintp = datae(1)
-            
+
             allocate(Tempeldt(MAXNHISTI*nintp))
+            Tempeldt = 0.d0      ! always zero first — prevents garbage from short eldt input
             Tempeldt = eldt
 !     
             ! initialization
@@ -840,6 +842,7 @@ I3(4,:) = [0.d0,0.d0,0.d0]
             
             ! read from history the current values
             depsipl           = Tempeldt(MAXNHISTI*(iintp-1)+ 25)
+            if (.not. (abs(depsipl) .le. huge(depsipl))) depsipl = 0.d0   ! sanitize Inf/NaN
             ddepsipldx(1:2,1) = Tempeldt(MAXNHISTI*(iintp-1)+ 26:27)
             dg_dEp            = Tempeldt(MAXNHISTI*(iintp-1)+ 28)
             m(1,1:4)          = Tempeldt(MAXNHISTI*(iintp-1)+ 29:32)
@@ -849,10 +852,6 @@ I3(4,:) = [0.d0,0.d0,0.d0]
             
             dEp_mem = dEp
             sigmac_prv = sigmac
-            
-!             call mexPrintf('\n')
-!             call mexPrintf('hello')
-!             call mexPrintf('\n')
 
             ! Jacobian
             displa  = reshape(ue(uix,1), (/2, nnode/))
@@ -989,8 +988,10 @@ I3(4,:) = [0.d0,0.d0,0.d0]
             dev(1:4,1) = [dev1(1,1), dev1(2,1), dev1(3,1)*2.d0, dev1(4,1)]
             devs(1:4,1) = [dev(1,1), dev(2,1), sqrt(2.d0)*dev(3,1)/2.d0, dev(4,1)]
             
-            ! von Mises stress
-            sigmae = sqrt(3.d0/2.d0 *dot_product(devs(1:4,1),devs(1:4,1)))
+            ! von Mises stress — explicit guard is more robust than max() under ifort fast-math
+            tmp_sigmae = 3.d0/2.d0 * dot_product(devs(1:4,1),devs(1:4,1))
+            if (tmp_sigmae .lt. 0.d0) tmp_sigmae = 0.d0
+            sigmae = sqrt(tmp_sigmae)
             
             ! Elastic
             if (ssl_flag .eq. 0) then
@@ -1005,7 +1006,7 @@ I3(4,:) = [0.d0,0.d0,0.d0]
                 rho(1:2,1) = 0.d0
                 tau(1:2,1) = 0.d0
                 
-                if (sigmac .eq. 0.d0) then
+                if (sigmac .le. 0.d0) then
                     ! initialize variables before a first increment is done
                     !~call history for the first time
                     dEp = 0.d0
@@ -1014,7 +1015,10 @@ I3(4,:) = [0.d0,0.d0,0.d0]
                     m(1,1:4) = 0.d0
                 else
                     ! first elastic step
-                    dEp = deps0 * (sigmac/gEp)**(1.d0/mvp)      ! Eq. 13
+                    ! overflow-safe power law: cap log before exp (prevents Inf when gEp is small)
+                    tmp_dEp_log = log(sigmac / gEp) / mvp
+                    if (tmp_dEp_log .gt. 23.d0) tmp_dEp_log = 23.d0
+                    dEp = deps0 * exp(tmp_dEp_log)               ! Eq. 13
             
                     ! control to avoid numerical issues due to the precision of the machine/MATLAB
                     if (dEp .lt. tole) then
@@ -1027,27 +1031,33 @@ I3(4,:) = [0.d0,0.d0,0.d0]
                     ! paper (Q here corresponds to q in Borg 2006)
                     depsipl = Q * dEp / sigmac
                     ddepsipldx = (dEp/sigmac/l_int**2)*rho
-                    m = 3.d0/2.d0 * transpose(dev)/sigmae
+                    if (sigmae .gt. 0.d0) then
+                        m = 3.d0/2.d0 * transpose(dev)/sigmae
+                    else
+                        m(1,1:4) = 0.d0
+                    end if
                     ssl_flag = 1        ! after first elastic step start viscoplastic case
                 end if
             else
 
             ! viscoplastic computation (between Eqs.17 and 18)
 
-                if (dEp .le. tole) then
-                    ! Cold-start guard: dEp from the previous iteration is at
-                    ! the numerical floor. Bypass the linearization (coefficients
-                    ! sigmac/dEp ~ 1/tole would amplify any delta into a NaN/Inf).
-                    ! Compute the VP state directly from the current stress instead.
-                    delta_rho_c(1:2,1) = 0.d0
-                    delta_rho = matmul(transpose(Ee), rho_prv)
-                    delta_tau = delta_rho_c + matmul(transpose(Ee), tau_prv) &
-                              & - tau_prv*(delta_epsi(1,1)+delta_epsi(2,1))
-                    Q = Q_prv
-                    rho = rho_prv + delta_rho
-                    tau = tau_prv + delta_tau
-                    sigmac = sqrt(Q**2 + dot_product(rho(1:2,1),rho(1:2,1))/l_int**2)
-                    dEp = deps0*(sigmac/gEp_prv)**(1.d0/mvp)
+                if (dEp .le. tole .and. Ep_prv .eq. 0.d0) then
+                    ! Cold-start guard: first load increment (Ep_prv=0, Q_prv still 0
+                    ! from pre-plastic history). Use current sigmae — same as elastic
+                    ! step — so sigmac > 0 and depsipl = dEp is well-defined.
+                    Q = sigmae
+                    rho(1:2,1) = 0.d0
+                    tau(1:2,1) = 0.d0
+                    sigmac = sigmae
+                    if (sigmac .gt. 0.d0) then
+                        tmp_dEp_log = log(sigmac / gEp_prv) / mvp
+                        if (tmp_dEp_log .gt. 23.d0) tmp_dEp_log = 23.d0
+                        dEp = deps0 * exp(tmp_dEp_log)
+                        if (dEp .lt. tole) dEp = tole
+                    else
+                        dEp = tole
+                    end if
                     unloading_flag = 0
                 else
 
@@ -1102,13 +1112,15 @@ I3(4,:) = [0.d0,0.d0,0.d0]
                 tau = tau_prv + delta_tau
                 
                 ! update sigmac (Eq.12)
-                sigmac = sqrt(Q**2 + dot_product(rho(1:2,1),rho(1:2,1))/l_int**2)
-                
+                sigmac = sqrt(max(0.d0, Q**2 + dot_product(rho(1:2,1),rho(1:2,1))/l_int**2))
+
                 ! update Ep_rate (Eqs. 14 & 13)
-                dEp = deps0 * (sigmac/gEp_prv)**(1.d0/mvp)
-                
+                tmp_dEp_log = log(sigmac / gEp_prv) / mvp
+                if (tmp_dEp_log .gt. 23.d0) tmp_dEp_log = 23.d0
+                dEp = deps0 * exp(tmp_dEp_log)
+
                 unloading_flag = 0
-                
+
 !!                 --- Evaluate individual conditions ---
 !                 cond1 = (sigmac .lt. sigmac_prv)
 !                 cond2 = (norm2(ddepsipldx) .le. deps0*1.5d0)
@@ -1148,10 +1160,12 @@ I3(4,:) = [0.d0,0.d0,0.d0]
                     tau = tau_prv
 
                     ! update sigmac (Eq.12)
-                    sigmac = sqrt(Q**2 + dot_product(rho(1:2,1),rho(1:2,1))/l_int**2)
+                    sigmac = sqrt(max(0.d0, Q**2 + dot_product(rho(1:2,1),rho(1:2,1))/l_int**2))
 
                     ! update Ep_rate (Eqs. 14 & 13)
-                    dEp = deps0 * (sigmac/gEp_prv)**(1.d0/mvp)
+                    tmp_dEp_log = log(sigmac / gEp_prv) / mvp
+                    if (tmp_dEp_log .gt. 23.d0) tmp_dEp_log = 23.d0
+                    dEp = deps0 * exp(tmp_dEp_log)
 
                     unloading_flag = 1
 
@@ -1223,20 +1237,28 @@ I3(4,:) = [0.d0,0.d0,0.d0]
                 call ghardening(Ep, matre, hardening_law, incriT, gEp, dg_dEp)
                 
                 ! update depsipl and ddepsipl (Eqs. 10 & 11)
-                depsipl = Q * dEp / sigmac
-                
-                ddepsipldx = (dEp / sigmac / l_int**2) * rho
-                
+                if (sigmac .gt. 0.d0) then
+                    depsipl = Q * dEp / sigmac
+                    ddepsipldx = (dEp / sigmac / l_int**2) * rho
+                else
+                    depsipl = 0.d0
+                    ddepsipldx(1:2,1) = 0.d0
+                end if
+
                 ! direction of the plastic flow
-                m = 3.d0/2.d0 * transpose(dev)/sigmae
-                
+                if (sigmae .gt. 0.d0) then
+                    m = 3.d0/2.d0 * transpose(dev)/sigmae
+                else
+                    m(1,1:4) = 0.d0
+                end if
+
 !                 if (depsipl .lt. tole) then
 !                     depsipl = tole
 !                 endif
                     
                 
             end if
-            
+
             ! store history data in current
             Tempeldt(MAXNHISTI*(iintp-1)+ 13:15) = epsi(1:3,1)
             Tempeldt(MAXNHISTI*(iintp-1)+ 16)    = epsipl
@@ -1418,6 +1440,7 @@ I3(4,:) = [0.d0,0.d0,0.d0]
         do iintp = 1,nintp
         
             depsipl           = Tempeldt(MAXNHISTI*(iintp-1)+ 25)     ! rate of sclar plastic strain rate
+            if (.not. (abs(depsipl) .le. huge(depsipl))) depsipl = 0.d0   ! sanitize Inf/NaN
             ddepsipldx(1:2,1) = Tempeldt(MAXNHISTI*(iintp-1)+ 26:27)  ! gradient of plastic strain rate
             dg_dEp            = Tempeldt(MAXNHISTI*(iintp-1)+ 28)     ! hardening stiffness
             m(1,1:4)          = Tempeldt(MAXNHISTI*(iintp-1)+ 29:32)  ! plastics strain direction

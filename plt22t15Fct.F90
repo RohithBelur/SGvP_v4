@@ -190,7 +190,8 @@ implicit none
     real*8                                                      :: tau_prv(2,1)
     real*8                                                      :: gEp_prv, rho_prv(2,1), veps_pl(4,1)
     real*8                                                      :: ad1, delta_depsipl_ad(1,1), xy(1,1)
-    
+    real*8                                                      :: tmp_sigmae
+
     real*8                                                      :: fvpu(12,1), fvpe(3,1), fvp(15,1), qs(1,1)
     
     real*8, dimension(:,:), allocatable                         :: outn, outi, Ee1, Fe1
@@ -306,6 +307,7 @@ I3(4,:) = [0.d0,0.d0,0.d0]
             nintp = datae(1)
             
             allocate(Tempeldt(MAXNHISTI*nintp))
+            Tempeldt = 0.d0      ! always zero first — prevents garbage from short eldt input
             Tempeldt = eldt
 !     
             ! initialization
@@ -992,7 +994,10 @@ I3(4,:) = [0.d0,0.d0,0.d0]
             devs(1:4,1) = [dev(1,1), dev(2,1), sqrt(2.d0)*dev(3,1)/2.d0, dev(4,1)]
             
             ! von Mises stress
-            sigmae = sqrt(3.d0/2.d0 *dot_product(devs(1:4,1),devs(1:4,1)))
+            ! von Mises stress — explicit guard is more robust than max() under ifort fast-math
+            tmp_sigmae = 3.d0/2.d0 * dot_product(devs(1:4,1),devs(1:4,1))
+            if (tmp_sigmae .lt. 0.d0) tmp_sigmae = 0.d0
+            sigmae = sqrt(tmp_sigmae)
             
             ! Elastic
             if (ssl_flag .eq. 0) then
@@ -1007,7 +1012,7 @@ I3(4,:) = [0.d0,0.d0,0.d0]
                 rho(1:2,1) = 0.d0
                 tau(1:2,1) = 0.d0
                 
-                if (sigmac .eq. 0.d0) then
+                if (sigmac .le. 0.d0) then
                     ! initialize variables before a first increment is done
                     !~call history for the first time
                     dEp = 0.d0
@@ -1017,7 +1022,7 @@ I3(4,:) = [0.d0,0.d0,0.d0]
                 else
                     ! first elastic step
                     dEp = deps0 * (sigmac/gEp)**(1.d0/mvp)      ! Eq. 13
-            
+
                     ! control to avoid numerical issues due to the precision of the machine/MATLAB
                     if (dEp .lt. tole) then
                         dEp = tole      ! rate of Ep dEp/dt, dt being small
@@ -1029,13 +1034,34 @@ I3(4,:) = [0.d0,0.d0,0.d0]
                     ! paper (Q here corresponds to q in Borg 2006)
                     depsipl = Q * dEp / sigmac
                     ddepsipldx = (dEp/sigmac/l_int**2)*rho
-                    m = 3.d0/2.d0 * transpose(dev)/sigmae
+                    if (sigmae .gt. 0.d0) then
+                        m = 3.d0/2.d0 * transpose(dev)/sigmae
+                    else
+                        m(1,1:4) = 0.d0
+                    end if
                     ssl_flag = 1        ! after first elastic step start viscoplastic case
                 end if
             else
             
-            ! viscoplastic computation (between Eqs.17 and 18)                
-            
+            ! viscoplastic computation (between Eqs.17 and 18)
+
+                if (dEp .le. tole .and. Ep_prv .eq. 0.d0) then
+                    ! Cold-start guard: first load increment (Ep_prv=0, Q_prv still 0
+                    ! from pre-plastic history). Use current sigmae — same as elastic
+                    ! step — so sigmac > 0 and depsipl = dEp is well-defined.
+                    Q = sigmae
+                    rho(1:2,1) = 0.d0
+                    tau(1:2,1) = 0.d0
+                    sigmac = sigmae
+                    if (sigmac .gt. 0.d0) then
+                        dEp = deps0*(sigmac/gEp_prv)**(1.d0/mvp)
+                        if (dEp .lt. tole) dEp = tole
+                    else
+                        dEp = tole
+                    end if
+                    unloading_flag = 0
+                else
+
                 delta_dEp = (depsipl/dEp) * delta_depsipl + (l_int**2/dEp) &
                             & * matmul(transpose(ddepsipldx),delta_ddepsipldx)
                     
@@ -1087,7 +1113,7 @@ I3(4,:) = [0.d0,0.d0,0.d0]
                 tau = tau_prv + delta_tau
                 
                 ! update sigmac (Eq.12)
-                sigmac = sqrt(Q**2 + dot_product(rho(1:2,1),rho(1:2,1))/l_int**2)
+                sigmac = sqrt(max(0.d0, Q**2 + dot_product(rho(1:2,1),rho(1:2,1))/l_int**2))
                 
                 ! update Ep_rate (Eqs. 14 & 13)
                 dEp = deps0 * (sigmac/gEp_prv)**(1.d0/mvp)
@@ -1133,7 +1159,7 @@ I3(4,:) = [0.d0,0.d0,0.d0]
                     tau = tau_prv
 
                     ! update sigmac (Eq.12)
-                    sigmac = sqrt(Q**2 + dot_product(rho(1:2,1),rho(1:2,1))/l_int**2)
+                    sigmac = sqrt(max(0.d0, Q**2 + dot_product(rho(1:2,1),rho(1:2,1))/l_int**2))
 
                     ! update Ep_rate (Eqs. 14 & 13)
                     dEp = deps0 * (sigmac/gEp_prv)**(1.d0/mvp)
@@ -1165,7 +1191,7 @@ I3(4,:) = [0.d0,0.d0,0.d0]
 !                    tau = tau_prv
 !                    
 !                    ! update sigmac (Eq.12)
-!                    sigmac = sqrt(Q**2 + dot_product(rho(1:2,1),rho(1:2,1))/l_int**2)
+!                    sigmac = sqrt(max(0.d0, Q**2 + dot_product(rho(1:2,1),rho(1:2,1))/l_int**2))
 !                    
 !                    ! update Ep_rate (Eqs. 14 & 13)
 !                    dEp = deps0 * (sigmac/gEp_prv)**(1.d0/mvp)
@@ -1177,7 +1203,9 @@ I3(4,:) = [0.d0,0.d0,0.d0]
 !                    call mexPrintf('\n')
 !                    
 !                end if
-                
+
+                end if ! cold-start guard
+
                 if ((sigmac/gEp_prv) .lt.0.8d0) then
                     plastic_flag = 0;
                 else
@@ -1206,13 +1234,21 @@ I3(4,:) = [0.d0,0.d0,0.d0]
                 call ghardening(Ep, matre, hardening_law, incriT, gEp, dg_dEp)
                 
                 ! update depsipl and ddepsipl (Eqs. 10 & 11)
-                depsipl = Q * dEp / sigmac
-                
-                ddepsipldx = (dEp / sigmac / l_int**2) * rho
-                
+                if (sigmac .gt. 0.d0) then
+                    depsipl = Q * dEp / sigmac
+                    ddepsipldx = (dEp / sigmac / l_int**2) * rho
+                else
+                    depsipl = 0.d0
+                    ddepsipldx(1:2,1) = 0.d0
+                end if
+
                 ! direction of the plastic flow
-                m = 3.d0/2.d0 * transpose(dev)/sigmae
-                
+                if (sigmae .gt. 0.d0) then
+                    m = 3.d0/2.d0 * transpose(dev)/sigmae
+                else
+                    m(1,1:4) = 0.d0
+                end if
+
 !                 if (depsipl .lt. tole) then
 !                     depsipl = tole
 !                 endif

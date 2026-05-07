@@ -35,7 +35,7 @@ if isempty(hist)
     if strcmp(eltpe(1:2),'pl') && strcmp(eltpe(3:4),'cs')
         histe = feval(eltpe, 'histe', [0], geome, matre, int64(datae), [0], [0], [0]);
     else
-        histe = feval(eltpe, 'histe', [0], geome, matre, int64(datae), zeros(1,200), [0], [0], [0]);
+        histe = feval(eltpe, 'histe', [0], geome, matre, int64(datae), zeros(1,220), [0], [0], [0]);
     end
 %
 %     adjust size of hist if necessary

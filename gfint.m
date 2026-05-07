@@ -97,10 +97,10 @@ end
   end
   hist(ielem, :) = histe;
   
-if any(isnan(histe))
+if any(isnan(histe) | isinf(histe))
     fprintf(1, ['\n  ielem = %9i  \n'], ielem)
     eval(['save ', 'histe.mat histe ;'])
-    error('NaN issues again !!!!!\n')
+    error('NaN/Inf issues in gfint !!!!!\n')
 end
 
 end

@@ -18,20 +18,20 @@ mex -g -O -largeArrayDims plbr2t15.F90 plbr2t15Fct.o findDet.o gdndxi.o gintp.o 
 % mex -c -g -O -largeArrayDims plte2t15Fct.F90 findDet.o gdndxi.o gintp.o gn.o inv.o ghardening.o
 % mex -g -O -largeArrayDims plte2t15.F90 plte2t15Fct.o findDet.o gdndxi.o gintp.o gn.o inv.o ghardening.o
 
-mex -c -g -O -largeArrayDims plt12t15Fct.F90 findDet.o gdndxi.o gintp.o gn.o inv.o ghardening.o
-mex -g -O -largeArrayDims plt12t15.F90 plt12t15Fct.o findDet.o gdndxi.o gintp.o gn.o inv.o ghardening.o
-
-mex -c -g -O -largeArrayDims plt22t15Fct.F90 findDet.o gdndxi.o gintp.o gn.o inv.o ghardening.o
-mex -g -O -largeArrayDims plt22t15.F90 plt22t15Fct.o findDet.o gdndxi.o gintp.o gn.o inv.o ghardening.o
-
-mex -c -g -O -largeArrayDims plt32t15Fct.F90 findDet.o gdndxi.o gintp.o gn.o inv.o ghardening.o
-mex -g -O -largeArrayDims plt32t15.F90 plt32t15Fct.o findDet.o gdndxi.o gintp.o gn.o inv.o ghardening.o
-
-mex -c -g -O -largeArrayDims plt42t15Fct.F90 findDet.o gdndxi.o gintp.o gn.o inv.o ghardening.o
-mex -g -O -largeArrayDims plt42t15.F90 plt42t15Fct.o findDet.o gdndxi.o gintp.o gn.o inv.o ghardening.o
-
-mex -c -g -O -largeArrayDims plgm2t15Fct.F90 findDet.o gdndxi.o gintp.o gn.o inv.o ghardening.o
-mex -g -O -largeArrayDims plgm2t15.F90 plgm2t15Fct.o findDet.o gdndxi.o gintp.o gn.o inv.o ghardening.o
+% mex -c -g -O -largeArrayDims plt12t15Fct.F90 findDet.o gdndxi.o gintp.o gn.o inv.o ghardening.o
+% mex -g -O -largeArrayDims plt12t15.F90 plt12t15Fct.o findDet.o gdndxi.o gintp.o gn.o inv.o ghardening.o
+% 
+% mex -c -g -O -largeArrayDims plt22t15Fct.F90 findDet.o gdndxi.o gintp.o gn.o inv.o ghardening.o
+% mex -g -O -largeArrayDims plt22t15.F90 plt22t15Fct.o findDet.o gdndxi.o gintp.o gn.o inv.o ghardening.o
+% 
+% mex -c -g -O -largeArrayDims plt32t15Fct.F90 findDet.o gdndxi.o gintp.o gn.o inv.o ghardening.o
+% mex -g -O -largeArrayDims plt32t15.F90 plt32t15Fct.o findDet.o gdndxi.o gintp.o gn.o inv.o ghardening.o
+% 
+% mex -c -g -O -largeArrayDims plt42t15Fct.F90 findDet.o gdndxi.o gintp.o gn.o inv.o ghardening.o
+% mex -g -O -largeArrayDims plt42t15.F90 plt42t15Fct.o findDet.o gdndxi.o gintp.o gn.o inv.o ghardening.o
+% 
+% mex -c -g -O -largeArrayDims plgm2t15Fct.F90 findDet.o gdndxi.o gintp.o gn.o inv.o ghardening.o
+% mex -g -O -largeArrayDims plgm2t15.F90 plgm2t15Fct.o findDet.o gdndxi.o gintp.o gn.o inv.o ghardening.o
 % 
 % mex -c -g -O -largeArrayDims plnt2t15Fct.F90 findDet.o gdndxi.o gintp.o gn.o inv.o ghardening.o
 % mex -g -O -largeArrayDims plnt2t15.F90 plnt2t15Fct.o findDet.o gdndxi.o gintp.o gn.o inv.o ghardening.o
