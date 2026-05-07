@@ -98,7 +98,16 @@ end
   hist(ielem, :) = histe;
   
 if any(isnan(histe) | isinf(histe))
+    bad = find(isnan(histe) | isinf(histe));
+    MAXNHISTI = 55;
     fprintf(1, ['\n  ielem = %9i  \n'], ielem)
+    fprintf(1, '  bad histe entries:\n')
+    for kk = 1:length(bad)
+        iintp_bad = ceil(bad(kk)/MAXNHISTI);
+        slot_bad  = mod(bad(kk)-1, MAXNHISTI) + 1;
+        fprintf(1, '    flat=%3d  iintp=%d  slot=%2d  val=%g\n', ...
+                bad(kk), iintp_bad, slot_bad, histe(bad(kk)))
+    end
     eval(['save ', 'histe.mat histe ;'])
     error('NaN/Inf issues in gfint !!!!!\n')
 end

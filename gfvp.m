@@ -81,7 +81,20 @@ end
   fvp(idof) = fvp(idof) + fvpe;
 %
 if any(isnan(fvpe) | isinf(fvpe))
-    fprintf(1, ['\n  ielem = %9i  \n'], ielem)
+    bad = find(isnan(fvpe) | isinf(fvpe));
+    MAXNHISTI = 55;
+    fprintf(1, ['\n  ielem = %9i  fvpe bad dofs: '], ielem)
+    fprintf(1, '%d ', bad); fprintf(1, '\n')
+    bh = find(isnan(histe) | isinf(histe));
+    if ~isempty(bh)
+        fprintf(1, '  bad histe entries in fvp:\n')
+        for kk = 1:length(bh)
+            iintp_bad = ceil(bh(kk)/MAXNHISTI);
+            slot_bad  = mod(bh(kk)-1, MAXNHISTI) + 1;
+            fprintf(1, '    flat=%3d  iintp=%d  slot=%2d  val=%g\n', ...
+                    bh(kk), iintp_bad, slot_bad, histe(bh(kk)))
+        end
+    end
     eval(['save ', 'fvpe.mat fvpe ;'])
     eval(['save ', 'histe.mat histe ;'])
     error('NaN issues in fvp !!!!!\n')

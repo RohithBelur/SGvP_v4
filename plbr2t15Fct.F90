@@ -1017,7 +1017,7 @@ I3(4,:) = [0.d0,0.d0,0.d0]
                     ! first elastic step
                     ! overflow-safe power law: cap log before exp (prevents Inf when gEp is small)
                     tmp_dEp_log = log(sigmac / gEp) / mvp
-                    if (tmp_dEp_log .gt. 23.d0) tmp_dEp_log = 23.d0
+                    if (tmp_dEp_log .gt. 690.d0) tmp_dEp_log = 690.d0
                     dEp = deps0 * exp(tmp_dEp_log)               ! Eq. 13
             
                     ! control to avoid numerical issues due to the precision of the machine/MATLAB
@@ -1052,7 +1052,7 @@ I3(4,:) = [0.d0,0.d0,0.d0]
                     sigmac = sigmae
                     if (sigmac .gt. 0.d0) then
                         tmp_dEp_log = log(sigmac / gEp_prv) / mvp
-                        if (tmp_dEp_log .gt. 23.d0) tmp_dEp_log = 23.d0
+                        if (tmp_dEp_log .gt. 690.d0) tmp_dEp_log = 690.d0
                         dEp = deps0 * exp(tmp_dEp_log)
                         if (dEp .lt. tole) dEp = tole
                     else
@@ -1116,7 +1116,7 @@ I3(4,:) = [0.d0,0.d0,0.d0]
 
                 ! update Ep_rate (Eqs. 14 & 13)
                 tmp_dEp_log = log(sigmac / gEp_prv) / mvp
-                if (tmp_dEp_log .gt. 23.d0) tmp_dEp_log = 23.d0
+                if (tmp_dEp_log .gt. 690.d0) tmp_dEp_log = 690.d0
                 dEp = deps0 * exp(tmp_dEp_log)
 
                 unloading_flag = 0
@@ -1164,7 +1164,7 @@ I3(4,:) = [0.d0,0.d0,0.d0]
 
                     ! update Ep_rate (Eqs. 14 & 13)
                     tmp_dEp_log = log(sigmac / gEp_prv) / mvp
-                    if (tmp_dEp_log .gt. 23.d0) tmp_dEp_log = 23.d0
+                    if (tmp_dEp_log .gt. 690.d0) tmp_dEp_log = 690.d0
                     dEp = deps0 * exp(tmp_dEp_log)
 
                     unloading_flag = 1
