@@ -1029,7 +1029,7 @@ I3(4,:) = [0.d0,0.d0,0.d0]
                     !   Updating depsipl and ddepsipl (eq. 10 and 11 in the paper)
                     ! !!!!!!! change Q to q, different notation than in the
                     ! paper (Q here corresponds to q in Borg 2006)
-                    depsipl = Q * dEp / sigmac
+                    depsipl = (Q / sigmac) * dEp   ! reordered: avoids Q*dEp intermediate overflow
                     ddepsipldx = (dEp/sigmac/l_int**2)*rho
                     if (sigmae .gt. 0.d0) then
                         m = 3.d0/2.d0 * transpose(dev)/sigmae
@@ -1060,6 +1060,8 @@ I3(4,:) = [0.d0,0.d0,0.d0]
                     end if
                     unloading_flag = 0
                 else
+
+                if (sigmac .ge. gEp_prv) then   ! above yield: apply VP linearization
 
                 delta_dEp = (depsipl/dEp) * delta_depsipl + (l_int**2/dEp) &
                             & * matmul(transpose(ddepsipldx),delta_ddepsipldx)
@@ -1207,6 +1209,24 @@ I3(4,:) = [0.d0,0.d0,0.d0]
 !                    
 !                end if
 
+                else   ! below yield: reset to elastic-like VP to avoid ill-conditioned delta_Q
+                    Q          = sigmae
+                    rho(1:2,1) = 0.d0
+                    tau(1:2,1) = 0.d0
+                    sigmac     = sigmae
+                    if (sigmac .gt. 0.d0) then
+                        tmp_dEp_log = log(sigmac / gEp_prv) / mvp
+                        if (tmp_dEp_log .gt. 690.d0) tmp_dEp_log = 690.d0
+                        dEp = deps0 * exp(tmp_dEp_log)
+                    else
+                        dEp = tole
+                    end if
+                    if (dEp .lt. tole) dEp = tole
+                    unloading_flag = 0
+                    flag_cond1 = 0; flag_cond2 = 0
+                    flag_cond3 = 0; flag_cond4 = 0
+                end if   ! above/below yield
+
                 end if ! cold-start guard
 
                 if ((sigmac/gEp_prv) .lt.0.8d0) then
@@ -1238,7 +1258,7 @@ I3(4,:) = [0.d0,0.d0,0.d0]
                 
                 ! update depsipl and ddepsipl (Eqs. 10 & 11)
                 if (sigmac .gt. 0.d0) then
-                    depsipl = Q * dEp / sigmac
+                    depsipl = (Q / sigmac) * dEp   ! reordered: avoids Q*dEp intermediate overflow
                     ddepsipldx = (dEp / sigmac / l_int**2) * rho
                 else
                     depsipl = 0.d0
