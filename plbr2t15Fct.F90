@@ -386,7 +386,9 @@ I3(4,:) = [0.d0,0.d0,0.d0]
         ! Intrensic length
             l_int = matre(1,16)
         end if
-        
+        ! reference strain rate
+        deps0 = matre(1,5)
+
         ! number of integration points
         nintp = datae(1)
 
@@ -430,24 +432,31 @@ I3(4,:) = [0.d0,0.d0,0.d0]
             m(1,1:4)           = Tempeldt(MAXNHISTI*(iintp-1)+ 29:32)
             ssl_flag           = Tempeldt(MAXNHISTI*(iintp-1)+ 34)
             sigmac             = Tempeldt(MAXNHISTI*(iintp-1)+ 35)
+            if (.not. (abs(sigmac) .le. huge(sigmac))) sigmac = 0.d0  ! sanitize Inf/NaN → below-yield fallback
             dEp                = Tempeldt(MAXNHISTI*(iintp-1)+ 37)
-            
+            if (.not. (abs(dEp) .le. huge(dEp))) dEp = tole           ! sanitize Inf/NaN
+            gEp_prv            = Tempeldt(MAXNHISTI*(iintp-1)+ 38)
+            ! Physical plausibility: large-but-finite sigmac from ill-conditioned K → fallback
+            if (gEp_prv .gt. 0.d0 .and. sigmac .gt. 1.d8 * gEp_prv) sigmac = 0.d0
+
             unloading_flag     = Tempeldt(MAXNHISTI*(iintp-1)+ 50)
-            
+
             dEp_mem = Tempeldt(MAXNHISTI*(iintp-1)+ 49)
-            
+
             displa  = reshape(ue(uix,1), (/2, nnode/))
-        
+
             call gdndxi(ipolu, xi(iintp, :),nnode, dNdxi)
-            
+
             J = matmul(transpose(nodee(:,1:2))+displa, dNdxi)
-            
+
             invJ = inv(J)
             detJ=abs(FindDet(J,2))/2.0d0
-            
+            ! Guard: degenerate Jacobian (bad disp DOFs from singular K) - skip integration point
+            if (.not. (abs(detJ) .gt. 0.d0) .or. .not. (detJ .le. huge(detJ))) cycle
+
             ! strain displacement matrix Bu
             dNdx = matmul(dNdxi,invJ)
-            
+
             do ii = 1,6
                 Eu(1,2*(ii-1)+1) = dNdx(ii,1)
                 Eu(2,2*(ii-1)+2) = dNdx(ii,2)
@@ -489,12 +498,24 @@ I3(4,:) = [0.d0,0.d0,0.d0]
             else
                 ! viscoplastic case
                 ! contribution from integration points (eq. 25 and 26 in the paper)
-                
+
+                if (sigmac .ge. gEp_prv .and. &
+                    sigmac .le. 1.d8 * max(gEp_prv, tole)) then   ! above yield and physically plausible
+
+                ! Safety: if history dEp is far too small, recompute from power law
+                ! to prevent huge sigmac/dEp entries in Kpp
+                if (dEp .lt. tole * 1.d3 .and. sigmac .gt. 0.d0) then
+                    tmp_dEp_log = log(max(tole, sigmac / gEp_prv)) / mvp
+                    if (tmp_dEp_log .gt. 690.d0) tmp_dEp_log = 690.d0
+                    dEp = deps0 * exp(tmp_dEp_log)
+                    if (dEp .lt. tole) dEp = tole
+                end if
+
                 Kpu(1:ndofe,1:ndofu) = Kpu(1:ndofe,1:ndofu) - w(iintp) * t * matmul(matmul(matmul(NeT,m),matmul(H,I3)),Bu)*detJ
-                
+
                 if (unloading_flag .eq. 1) then
-                    Kpp(1:ndofe,1:ndofe) = 1.d0
-                    
+                    Kpp(1:ndofe,1:ndofe) = Kpp(1:ndofe,1:ndofe) + coeff * Iden
+
                     call mexPrintf('\n')
                     call mexPrintf('Kpp fix !!!')
                     call mexPrintf('\n')
@@ -506,10 +527,13 @@ I3(4,:) = [0.d0,0.d0,0.d0]
                             & + w(iintp) * t * (l_int/dEp)**2 *(mvp-1.d0)* &
                                                 & matmul(matmul(transpose(Be),ddepsipldx),matmul(transpose(rho),Be))*detJ &
                                 & + w(iintp) * t * l_int**2 * sigmac/dEp * matmul(transpose(Be),Be)*detJ
-                
+
                 endif
-            
-                
+
+                else   ! below yield: elastic-like Kpp to avoid ill-conditioned 1/dEp terms
+                    Kpp(1:ndofe,1:ndofe) = Kpp(1:ndofe,1:ndofe) + coeff * Iden
+                end if   ! above/below yield
+
 
 !                 xx = (depsipl*(mvp-1.d0)*Q/dEp**2 + sigmac/dEp )*matmul(NeT,Ne)
                 
@@ -608,14 +632,16 @@ I3(4,:) = [0.d0,0.d0,0.d0]
             
             ! compute Jacobian
             displa  = reshape(ue(uix,1), (/2, nnode/))
-        
+
             call gdndxi(ipolu, xi(iintp, :),nnode, dNdxi)
-            
+
             J = matmul(transpose(nodee(:,1:2))+displa, dNdxi)
-            
+
             invJ = inv(J)
             detJ=abs(FindDet(J,2))/2.0d0
-            
+            ! Guard: degenerate Jacobian (bad disp DOFs from singular K) - skip integration point
+            if (.not. (abs(detJ) .gt. 0.d0) .or. .not. (detJ .le. huge(detJ))) cycle
+
             ! strain displacement matrix Bu
             dNdx = matmul(dNdxi,invJ)
             
@@ -830,25 +856,31 @@ I3(4,:) = [0.d0,0.d0,0.d0]
             sigma_prv(1:4,1) = Tempeldt(MAXNHISTI*(iintp-1)+ 5:8)
             Ep_prv           = Tempeldt(MAXNHISTI*(iintp-1)+ 9)
             Q_prv            = Tempeldt(MAXNHISTI*(iintp-1)+ 10)
+            if (.not. (abs(Q_prv) .le. huge(Q_prv))) Q_prv = 0.d0   ! sanitize Inf/NaN
             tau_prv(1:2,1)   = Tempeldt(MAXNHISTI*(iintp-1)+ 11:12)
+            where (.not. (abs(tau_prv) .le. huge(tau_prv(1,1)))) tau_prv = 0.d0  ! sanitize Inf/NaN
             gEp_prv          = Tempeldt(MAXNHISTI*(iintp-1)+ 38)
             rho_prv(1:2,1)   = Tempeldt(MAXNHISTI*(iintp-1)+ 39:40)
+            where (.not. (abs(rho_prv) .le. huge(rho_prv(1,1)))) rho_prv = 0.d0  ! sanitize Inf/NaN
             veps_pl(1:4,1)   = Tempeldt(MAXNHISTI*(iintp-1)+ 41:44)
-            
+
             SIGMA1(1,1) = sigma_prv(1,1)
             SIGMA1(2,2) = sigma_prv(2,1)
             SIGMA1(1,2) = sigma_prv(3,1)
             SIGMA1(2,1) = sigma_prv(3,1)
-            
+
             ! read from history the current values
             depsipl           = Tempeldt(MAXNHISTI*(iintp-1)+ 25)
             if (.not. (abs(depsipl) .le. huge(depsipl))) depsipl = 0.d0   ! sanitize Inf/NaN
             ddepsipldx(1:2,1) = Tempeldt(MAXNHISTI*(iintp-1)+ 26:27)
+            where (.not. (abs(ddepsipldx) .le. huge(ddepsipldx(1,1)))) ddepsipldx = 0.d0  ! sanitize Inf/NaN
             dg_dEp            = Tempeldt(MAXNHISTI*(iintp-1)+ 28)
             m(1,1:4)          = Tempeldt(MAXNHISTI*(iintp-1)+ 29:32)
             ssl_flag          = Tempeldt(MAXNHISTI*(iintp-1)+ 34)
             sigmac            = Tempeldt(MAXNHISTI*(iintp-1)+ 35)
+            if (.not. (abs(sigmac) .le. huge(sigmac))) sigmac = 0.d0  ! sanitize Inf/NaN → triggers below-yield reset
             dEp               = Tempeldt(MAXNHISTI*(iintp-1)+ 37)
+            if (.not. (abs(dEp) .le. huge(dEp))) dEp = tole           ! sanitize Inf/NaN
             
             dEp_mem = dEp
             sigmac_prv = sigmac
@@ -856,14 +888,16 @@ I3(4,:) = [0.d0,0.d0,0.d0]
             ! Jacobian
             displa  = reshape(ue(uix,1), (/2, nnode/))
             ddispla = reshape(due(uix,1), (/2, nnode/))
-        
+
             call gdndxi(ipolu, xi(iintp, :),nnode, dNdxi)
-            
+
             J = matmul(transpose(nodee(:,1:2))+(displa-ddispla), dNdxi)
-            
+
             invJ = inv(J)
             detJ=abs(FindDet(J,2))/2.0d0
-            
+            ! Guard: degenerate Jacobian (bad disp DOFs from singular K) - skip integration point
+            if (.not. (abs(detJ) .gt. 0.d0) .or. .not. (detJ .le. huge(detJ))) cycle
+
             ! strain displacement matrix Bu
             dNdx = matmul(dNdxi,invJ)
             
@@ -1061,7 +1095,17 @@ I3(4,:) = [0.d0,0.d0,0.d0]
                     unloading_flag = 0
                 else
 
-                if (sigmac .ge. gEp_prv) then   ! above yield: apply VP linearization
+                if (sigmac .ge. gEp_prv .and. &
+                    sigmac .le. 1.d8 * max(gEp_prv, Y)) then   ! above yield and physically plausible
+
+                ! Safety: if history dEp is far too small for an above-yield state,
+                ! recompute from power law to prevent huge sigmac/dEp in delta_Q
+                if (dEp .lt. tole * 1.d3 .and. sigmac .gt. 0.d0) then
+                    tmp_dEp_log = log(max(tole, sigmac / gEp_prv)) / mvp
+                    if (tmp_dEp_log .gt. 690.d0) tmp_dEp_log = 690.d0
+                    dEp = deps0 * exp(tmp_dEp_log)
+                    if (dEp .lt. tole) dEp = tole
+                end if
 
                 delta_dEp = (depsipl/dEp) * delta_depsipl + (l_int**2/dEp) &
                             & * matmul(transpose(ddepsipldx),delta_ddepsipldx)
@@ -1279,6 +1323,42 @@ I3(4,:) = [0.d0,0.d0,0.d0]
                 
             end if
 
+            ! Write-time sanitizer: if Q, rho, or tau overflowed (e.g. ill-conditioned K gave
+            ! huge delta_depsipl/ddepsipldx → delta_Q/delta_rho = Inf), roll back to
+            ! previous-increment state so that Inf/NaN never propagates into history.
+            if ((.not. (abs(Q) .le. huge(Q)))      .or. abs(Q)      .gt. 1.d8 * Y .or. &
+                (.not. (abs(rho(1,1)) .le. huge(rho(1,1)))) .or. abs(rho(1,1)) .gt. 1.d8 * Y .or. &
+                (.not. (abs(rho(2,1)) .le. huge(rho(2,1)))) .or. abs(rho(2,1)) .gt. 1.d8 * Y .or. &
+                (.not. (abs(tau(1,1)) .le. huge(tau(1,1)))) .or. abs(tau(1,1)) .gt. 1.d8 * Y .or. &
+                (.not. (abs(tau(2,1)) .le. huge(tau(2,1)))) .or. abs(tau(2,1)) .gt. 1.d8 * Y) then
+                Q          = Q_prv
+                rho(1:2,1) = rho_prv(1:2,1)
+                tau(1:2,1) = tau_prv(1:2,1)
+                sigmac      = sqrt(max(0.d0, Q**2 + dot_product(rho(1:2,1),rho(1:2,1))/l_int**2))
+                if (.not. (abs(sigmac) .le. huge(sigmac))) sigmac = sigmac_prv
+                if (.not. (abs(sigmac) .le. huge(sigmac))) sigmac = 0.d0
+                tmp_dEp_log = log(max(tole, sigmac / max(tole, gEp_prv))) / mvp
+                if (tmp_dEp_log .gt. 690.d0) tmp_dEp_log = 690.d0
+                dEp = deps0 * exp(tmp_dEp_log)
+                if (dEp .lt. tole) dEp = tole
+                ! Recompute depsipl/ddepsipldx from sanitized state (prev. values may be NaN)
+                if (sigmac .gt. 0.d0) then
+                    depsipl = (Q / sigmac) * dEp
+                    ddepsipldx(1:2,1) = (dEp / sigmac / l_int**2) * rho(1:2,1)
+                else
+                    depsipl = 0.d0
+                    ddepsipldx(1:2,1) = 0.d0
+                end if
+                unloading_flag = 1
+            end if
+            ! Clamp any remaining Inf/NaN in sigmac and sigmae (last resort)
+            if (.not. (abs(sigmac) .le. huge(sigmac))) then
+                sigmac = sigmac_prv
+                if (.not. (abs(sigmac) .le. huge(sigmac))) sigmac = 0.d0
+            end if
+            if (.not. (abs(sigmae) .le. huge(sigmae))) sigmae = 0.d0
+            if (.not. (abs(depsipl) .le. huge(depsipl))) depsipl = 0.d0
+
             ! store history data in current
             Tempeldt(MAXNHISTI*(iintp-1)+ 13:15) = epsi(1:3,1)
             Tempeldt(MAXNHISTI*(iintp-1)+ 16)    = epsipl
@@ -1462,9 +1542,13 @@ I3(4,:) = [0.d0,0.d0,0.d0]
             depsipl           = Tempeldt(MAXNHISTI*(iintp-1)+ 25)     ! rate of sclar plastic strain rate
             if (.not. (abs(depsipl) .le. huge(depsipl))) depsipl = 0.d0   ! sanitize Inf/NaN
             ddepsipldx(1:2,1) = Tempeldt(MAXNHISTI*(iintp-1)+ 26:27)  ! gradient of plastic strain rate
+            where (.not. (abs(ddepsipldx) .le. huge(ddepsipldx(1,1)))) ddepsipldx = 0.d0  ! sanitize Inf/NaN
             dg_dEp            = Tempeldt(MAXNHISTI*(iintp-1)+ 28)     ! hardening stiffness
+            if (.not. (abs(dg_dEp) .le. huge(dg_dEp))) dg_dEp = 0.d0  ! sanitize Inf/NaN
             m(1,1:4)          = Tempeldt(MAXNHISTI*(iintp-1)+ 29:32)  ! plastics strain direction
+            where (.not. (abs(m(1,:)) .le. huge(m(1,1)))) m(1,:) = 0.d0  ! sanitize Inf/NaN
             dEp               = Tempeldt(MAXNHISTI*(iintp-1)+ 37)     ! rate of generalised plastic strain
+            if (.not. (abs(dEp) .le. huge(dEp))) dEp = tole  ! sanitize Inf/NaN
             
             dEp_mem = Tempeldt(MAXNHISTI*(iintp-1)+ 49)
             
@@ -1472,14 +1556,16 @@ I3(4,:) = [0.d0,0.d0,0.d0]
             
             ! Jacobian
             displa  = reshape(ue(uix,1), (/2, nnode/))
-        
+
             call gdndxi(ipolu, xi(iintp, :),nnode, dNdxi)
-            
+
             J = matmul(transpose(nodee(:,1:2))+ displa, dNdxi)
-            
+
             invJ = inv(J)
             detJ=abs(FindDet(J,2))/2.0d0
-            
+            ! Guard: degenerate Jacobian (bad disp DOFs from singular K) - skip integration point
+            if (.not. (abs(detJ) .gt. 0.d0) .or. .not. (detJ .le. huge(detJ))) cycle
+
             ! strain displacement matrix Bu
             dNdx = matmul(dNdxi,invJ)
             

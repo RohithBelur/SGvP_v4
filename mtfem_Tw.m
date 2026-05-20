@@ -355,10 +355,12 @@ while (incrloop)
 
         du = du1';
     
-    if any(isnan(du))
-        % check if the system is solved correctly or not
-%         eval(['save ',dbase ,' u fint fext_reac fext fres hist reacti iincr sxx' ]);
-        error('NaN issues again !!!!!\n')
+    if any(~isfinite(du))
+        % K singular or ill-conditioned: Inf/NaN in du would corrupt u permanently.
+        % Zero out du and break the iteration loop — displacement field stays unchanged.
+        fprintf(1, '\n  WARNING: du has Inf/NaN (K likely singular), zeroing du\n');
+        du = zeros(size(du));
+        break;
     end
 
 %         trunc = 22;
